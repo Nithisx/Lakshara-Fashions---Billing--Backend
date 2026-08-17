@@ -109,6 +109,20 @@ const initDB = async () => {
     console.log("Users table verified/created successfully.");
     await client.query(createInvoicesTableQuery);
     console.log("Invoices table verified/created successfully.");
+    
+    // Add share_token column if it doesn't exist
+    await client.query(`
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS share_token VARCHAR(100) UNIQUE;
+    `);
+    console.log("Verified share_token column in invoices table.");
+    
+    // Backfill any empty share_tokens for existing invoices
+    await client.query(`
+      UPDATE invoices SET share_token = md5(random()::text || clock_timestamp()::text) 
+      WHERE share_token IS NULL;
+    `);
+    console.log("Backfilled share_token for existing invoices.");
+
     await client.query(createInvoiceItemsTableQuery);
     console.log("Invoice items table verified/created successfully.");
     client.release();

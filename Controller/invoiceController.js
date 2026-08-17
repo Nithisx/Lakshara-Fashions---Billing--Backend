@@ -1,4 +1,5 @@
 const { pool } = require('../DB/db');
+const crypto = require('crypto');
 
 // Create a new Invoice
 const createInvoice = async (req, res) => {
@@ -32,11 +33,14 @@ const createInvoice = async (req, res) => {
       return res.status(400).json({ error: `Invoice ID ${invoice_number} already exists. Please use a unique ID.` });
     }
 
+    // Generate unique share token
+    const shareToken = crypto.randomBytes(16).toString('hex');
+
     // 2. Insert Invoice
     const insertInvoiceQuery = `
-      INSERT INTO invoices (invoice_number, customer_name, customer_phone, invoice_date, payment_method, total_amount, user_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, invoice_number, customer_name, customer_phone, invoice_date, payment_method, total_amount, created_at
+      INSERT INTO invoices (invoice_number, customer_name, customer_phone, invoice_date, payment_method, total_amount, user_id, share_token)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, invoice_number, customer_name, customer_phone, invoice_date, payment_method, total_amount, share_token, created_at
     `;
     const invoiceResult = await client.query(insertInvoiceQuery, [
       invoice_number,
@@ -45,7 +49,8 @@ const createInvoice = async (req, res) => {
       invoice_date,
       payment_method,
       total_amount,
-      userId
+      userId,
+      shareToken
     ]);
 
     const createdInvoice = invoiceResult.rows[0];
@@ -168,9 +173,44 @@ const getClients = async (req, res) => {
   }
 };
 
+// Get details of a single Invoice by its share token (Public)
+const getInvoiceByShareToken = async (req, res) => {
+  const { shareToken } = req.params;
+
+  try {
+    // Fetch Invoice (no user_id requirement since it's public)
+    const invoiceResult = await pool.query(
+      'SELECT * FROM invoices WHERE share_token = $1',
+      [shareToken]
+    );
+
+    if (invoiceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invoice not found.' });
+    }
+
+    const invoice = invoiceResult.rows[0];
+
+    // Fetch Invoice Items
+    const itemsResult = await pool.query(
+      'SELECT id, item_name, quantity, unit_price, total_price FROM invoice_items WHERE invoice_id = $1',
+      [invoice.id]
+    );
+
+    return res.status(200).json({
+      invoice,
+      items: itemsResult.rows
+    });
+
+  } catch (error) {
+    console.error('Fetch shared invoice details error:', error.message);
+    return res.status(500).json({ error: 'Server error fetching shared invoice details.' });
+  }
+};
+
 module.exports = {
   createInvoice,
   getInvoices,
   getInvoiceById,
-  getClients
+  getClients,
+  getInvoiceByShareToken
 };

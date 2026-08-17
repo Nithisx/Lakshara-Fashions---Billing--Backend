@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { createInvoice, getInvoices, getInvoiceById, getClients } = require('../Controller/invoiceController');
+const { createInvoice, getInvoices, getInvoiceById, getClients, getInvoiceByShareToken } = require('../Controller/invoiceController');
 const authMiddleware = require('../Middleware/authMiddleware');
 
-// All routes require authentication
+// Public route to view a shared invoice
+router.get('/share/:shareToken', getInvoiceByShareToken);
+
+// All subsequent routes require authentication
 router.use(authMiddleware);
 
 // Create a new invoice
