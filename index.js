@@ -4,6 +4,8 @@ require('dotenv').config();
 const { initDB } = require('./DB/db');
 const authRouter = require('./Router/auth');
 const invoiceRouter = require('./Router/invoice');
+const customerRouter = require('./Router/customer');
+const orderRouter = require('./Router/order');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -16,7 +18,7 @@ app.use(cors({
 }));
 
 // Body parser
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // support image base64 uploads
 
 // Main Root route
 app.get('/', (req, res) => {
@@ -26,6 +28,8 @@ app.get('/', (req, res) => {
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/invoices', invoiceRouter);
+app.use('/api/customers', customerRouter);
+app.use('/api/orders', orderRouter);
 
 // WhatsApp Webhook Verification (GET /webhook) - triggers reload
 app.get('/webhook', (req, res) => {

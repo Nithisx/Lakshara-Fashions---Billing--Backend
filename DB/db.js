@@ -77,6 +77,23 @@ const initDB = async () => {
     );
   `;
 
+  const createCustomersTableQuery = `
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      full_name VARCHAR(255) NOT NULL,
+      phone_number VARCHAR(55) NOT NULL,
+      email VARCHAR(255),
+      address TEXT,
+      city VARCHAR(100),
+      state VARCHAR(100),
+      postal_code VARCHAR(50),
+      gender VARCHAR(20),
+      user_id INT REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (phone_number, user_id)
+    );
+  `;
+
   const createInvoicesTableQuery = `
     CREATE TABLE IF NOT EXISTS invoices (
       id SERIAL PRIMARY KEY,
@@ -88,6 +105,29 @@ const initDB = async () => {
       total_amount NUMERIC(10, 2) NOT NULL,
       user_id INT REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+
+  const createOrdersTableQuery = `
+    CREATE TABLE IF NOT EXISTS orders (
+      id SERIAL PRIMARY KEY,
+      order_number VARCHAR(100) UNIQUE NOT NULL,
+      customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
+      service_type VARCHAR(50),
+      measurements JSONB NOT NULL DEFAULT '{}'::jsonb,
+      special_instructions TEXT,
+      inspiration_link TEXT,
+      cloth_images TEXT,
+      delivery_date DATE NOT NULL,
+      trial_date DATE,
+      quantity INT NOT NULL DEFAULT 1,
+      stitching_price NUMERIC(10, 2),
+      price_breakup TEXT,
+      status VARCHAR(50) DEFAULT 'Pending',
+      invoice_id INT REFERENCES invoices(id) ON DELETE SET NULL,
+      user_id INT REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      items JSONB NOT NULL DEFAULT '[]'::jsonb
     );
   `;
 
@@ -107,6 +147,8 @@ const initDB = async () => {
     console.log("Successfully connected to the PostgreSQL database.");
     await client.query(createUsersTableQuery);
     console.log("Users table verified/created successfully.");
+    await client.query(createCustomersTableQuery);
+    console.log("Customers table verified/created successfully.");
     await client.query(createInvoicesTableQuery);
     console.log("Invoices table verified/created successfully.");
     
@@ -115,6 +157,12 @@ const initDB = async () => {
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS share_token VARCHAR(100) UNIQUE;
     `);
     console.log("Verified share_token column in invoices table.");
+
+    // Add optional customer_id to invoices if it doesn't exist
+    await client.query(`
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INT REFERENCES customers(id) ON DELETE SET NULL;
+    `);
+    console.log("Verified customer_id column in invoices table.");
     
     // Backfill any empty share_tokens for existing invoices
     await client.query(`
@@ -122,6 +170,17 @@ const initDB = async () => {
       WHERE share_token IS NULL;
     `);
     console.log("Backfilled share_token for existing invoices.");
+
+    await client.query(createOrdersTableQuery);
+    console.log("Orders table verified/created successfully.");
+
+    // Run schema alterations for existing orders table if needed
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE orders ALTER COLUMN service_type DROP NOT NULL;
+      ALTER TABLE orders ALTER COLUMN stitching_price DROP NOT NULL;
+    `);
+    console.log("Verified items column and dropped constraints in orders table.");
 
     await client.query(createInvoiceItemsTableQuery);
     console.log("Invoice items table verified/created successfully.");
