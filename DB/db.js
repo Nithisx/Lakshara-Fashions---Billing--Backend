@@ -1,40 +1,53 @@
-const { Pool } = require('pg');
-require('dotenv').config();
+const { Pool } = require("pg");
+require("dotenv").config();
 
 const dbUrl = process.env.DB_url;
 
 if (!dbUrl) {
-  console.error("Database connection URL (DB_url) is missing in environment variables!");
+  console.error(
+    "Database connection URL (DB_url) is missing in environment variables!",
+  );
   process.exit(1);
 }
 
 let poolConfig = {};
 
-const useSSL = process.env.DB_SSL !== undefined
-  ? process.env.DB_SSL === 'true'
-  : !(dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1'));
+const useSSL =
+  process.env.DB_SSL !== undefined
+    ? process.env.DB_SSL === "true"
+    : !(dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1"));
 
 try {
   // Custom parser to split on the last '@' to handle passwords containing '@'
-  if (dbUrl.includes('@')) {
+  if (dbUrl.includes("@")) {
     const withoutPrefix = dbUrl.replace(/^postgresql:\/\/|^postgres:\/\//, "");
     const lastAtIndex = withoutPrefix.lastIndexOf("@");
-    
+
     if (lastAtIndex !== -1) {
       const userPass = withoutPrefix.substring(0, lastAtIndex);
       const hostDb = withoutPrefix.substring(lastAtIndex + 1);
 
       const colonIndex = userPass.indexOf(":");
-      const user = colonIndex !== -1 ? userPass.substring(0, colonIndex) : userPass;
-      const password = colonIndex !== -1 ? userPass.substring(colonIndex + 1) : "";
+      const user =
+        colonIndex !== -1 ? userPass.substring(0, colonIndex) : userPass;
+      const password =
+        colonIndex !== -1 ? userPass.substring(colonIndex + 1) : "";
 
       const slashIndex = hostDb.indexOf("/");
-      const hostPort = slashIndex !== -1 ? hostDb.substring(0, slashIndex) : hostDb;
-      const database = slashIndex !== -1 ? hostDb.substring(slashIndex + 1) : "";
+      const hostPort =
+        slashIndex !== -1 ? hostDb.substring(0, slashIndex) : hostDb;
+      const database =
+        slashIndex !== -1 ? hostDb.substring(slashIndex + 1) : "";
 
       const hostPortColonIndex = hostPort.indexOf(":");
-      const host = hostPortColonIndex !== -1 ? hostPort.substring(0, hostPortColonIndex) : hostPort;
-      const port = hostPortColonIndex !== -1 ? parseInt(hostPort.substring(hostPortColonIndex + 1), 10) : 5432;
+      const host =
+        hostPortColonIndex !== -1
+          ? hostPort.substring(0, hostPortColonIndex)
+          : hostPort;
+      const port =
+        hostPortColonIndex !== -1
+          ? parseInt(hostPort.substring(hostPortColonIndex + 1), 10)
+          : 5432;
 
       poolConfig = {
         user,
@@ -42,25 +55,28 @@ try {
         host,
         port,
         database,
-        ssl: useSSL ? { rejectUnauthorized: false } : false
+        ssl: useSSL ? { rejectUnauthorized: false } : false,
       };
     } else {
       poolConfig = {
         connectionString: dbUrl,
-        ssl: useSSL ? { rejectUnauthorized: false } : false
+        ssl: useSSL ? { rejectUnauthorized: false } : false,
       };
     }
   } else {
     poolConfig = {
       connectionString: dbUrl,
-      ssl: useSSL ? { rejectUnauthorized: false } : false
+      ssl: useSSL ? { rejectUnauthorized: false } : false,
     };
   }
 } catch (error) {
-  console.error("Error parsing DB_url, falling back to connectionString direct pass:", error.message);
+  console.error(
+    "Error parsing DB_url, falling back to connectionString direct pass:",
+    error.message,
+  );
   poolConfig = {
     connectionString: dbUrl,
-    ssl: useSSL ? { rejectUnauthorized: false } : false
+    ssl: useSSL ? { rejectUnauthorized: false } : false,
   };
 }
 
@@ -138,7 +154,8 @@ const initDB = async () => {
       item_name VARCHAR(255) NOT NULL,
       quantity INT NOT NULL,
       unit_price NUMERIC(10, 2) NOT NULL,
-      total_price NUMERIC(10, 2) NOT NULL
+      total_price NUMERIC(10, 2) NOT NULL,
+      measurements JSONB NOT NULL DEFAULT '{}'::jsonb
     );
   `;
 
@@ -151,7 +168,7 @@ const initDB = async () => {
     console.log("Customers table verified/created successfully.");
     await client.query(createInvoicesTableQuery);
     console.log("Invoices table verified/created successfully.");
-    
+
     // Add share_token column if it doesn't exist
     await client.query(`
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS share_token VARCHAR(100) UNIQUE;
@@ -163,7 +180,7 @@ const initDB = async () => {
       ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_id INT REFERENCES customers(id) ON DELETE SET NULL;
     `);
     console.log("Verified customer_id column in invoices table.");
-    
+
     // Backfill any empty share_tokens for existing invoices
     await client.query(`
       UPDATE invoices SET share_token = md5(random()::text || clock_timestamp()::text) 
@@ -180,10 +197,44 @@ const initDB = async () => {
       ALTER TABLE orders ALTER COLUMN service_type DROP NOT NULL;
       ALTER TABLE orders ALTER COLUMN stitching_price DROP NOT NULL;
     `);
-    console.log("Verified items column and dropped constraints in orders table.");
+    console.log(
+      "Verified items column and dropped constraints in orders table.",
+    );
+
+    // Add payment tracking columns to orders if they don't exist
+    await client.query(`
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS advance_paid NUMERIC(10, 2) NOT NULL DEFAULT 0;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10, 2) NOT NULL DEFAULT 0;
+    `);
+    console.log(
+      "Verified advance_paid and balance_due columns in orders table.",
+    );
+
+    // Backfill balance_due for existing orders where it is still 0
+    await client.query(`
+      UPDATE orders
+      SET balance_due = GREATEST((COALESCE(stitching_price, 0) * COALESCE(quantity, 1)) - COALESCE(advance_paid, 0), 0)
+      WHERE balance_due = 0 AND stitching_price IS NOT NULL AND stitching_price > 0;
+    `);
+    console.log("Backfilled balance_due for existing orders.");
+
+    // Add payment tracking columns to invoices if they don't exist
+    await client.query(`
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS advance_paid NUMERIC(10, 2) NOT NULL DEFAULT 0;
+      ALTER TABLE invoices ADD COLUMN IF NOT EXISTS balance_due NUMERIC(10, 2) NOT NULL DEFAULT 0;
+    `);
+    console.log(
+      "Verified advance_paid and balance_due columns in invoices table.",
+    );
 
     await client.query(createInvoiceItemsTableQuery);
     console.log("Invoice items table verified/created successfully.");
+
+    await client.query(`
+      ALTER TABLE invoice_items ADD COLUMN IF NOT EXISTS measurements JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `);
+    console.log("Verified measurements column in invoice_items table.");
+
     client.release();
   } catch (err) {
     console.error("Database initialization failed:", err.message);
@@ -193,5 +244,5 @@ const initDB = async () => {
 
 module.exports = {
   pool,
-  initDB
+  initDB,
 };
