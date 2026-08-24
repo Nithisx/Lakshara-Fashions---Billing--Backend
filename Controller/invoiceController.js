@@ -29,11 +29,9 @@ const createInvoice = async (req, res) => {
     !Array.isArray(items) ||
     items.length === 0
   ) {
-    return res
-      .status(400)
-      .json({
-        error: "All invoice fields and at least one item are required.",
-      });
+    return res.status(400).json({
+      error: "All invoice fields and at least one item are required.",
+    });
   }
 
   const client = await pool.connect();
@@ -49,11 +47,9 @@ const createInvoice = async (req, res) => {
     );
     if (dupCheck.rows.length > 0) {
       await client.query("ROLLBACK");
-      return res
-        .status(400)
-        .json({
-          error: `Invoice ID ${invoice_number} already exists. Please use a unique ID.`,
-        });
+      return res.status(400).json({
+        error: `Order ID ${invoice_number} already exists. Please use a unique ID.`,
+      });
     }
 
     // Generate unique share token
@@ -97,12 +93,10 @@ const createInvoice = async (req, res) => {
 
       if (!item_name || !quantity || !unit_price) {
         await client.query("ROLLBACK");
-        return res
-          .status(400)
-          .json({
-            error:
-              "Invalid item entries. Name, quantity, and unit price are required.",
-          });
+        return res.status(400).json({
+          error:
+            "Invalid item entries. Name, quantity, and unit price are required.",
+        });
       }
 
       const totalPrice = quantity * unit_price;
@@ -131,6 +125,40 @@ const createInvoice = async (req, res) => {
     return res
       .status(500)
       .json({ error: "Server error during invoice creation." });
+  }
+};
+
+// Get details of a single Invoice by order number (invoice_number)
+const getInvoiceByOrderNumber = async (req, res) => {
+  const userId = req.user.id;
+  const { orderNumber } = req.params;
+
+  try {
+    const invoiceResult = await pool.query(
+      "SELECT * FROM invoices WHERE invoice_number = $1 AND user_id = $2",
+      [orderNumber, userId],
+    );
+
+    if (invoiceResult.rows.length === 0) {
+      return res.status(404).json({ error: "Invoice not found." });
+    }
+
+    const invoice = invoiceResult.rows[0];
+
+    const itemsResult = await pool.query(
+      "SELECT id, item_name, quantity, unit_price, total_price, measurements FROM invoice_items WHERE invoice_id = $1",
+      [invoice.id],
+    );
+
+    return res.status(200).json({
+      invoice,
+      items: itemsResult.rows,
+    });
+  } catch (error) {
+    console.error("Fetch invoice by order number error:", error.message);
+    return res
+      .status(500)
+      .json({ error: "Server error fetching invoice details." });
   }
 };
 
@@ -251,6 +279,7 @@ module.exports = {
   createInvoice,
   getInvoices,
   getInvoiceById,
+  getInvoiceByOrderNumber,
   getClients,
   getInvoiceByShareToken,
 };
